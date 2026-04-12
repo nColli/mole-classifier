@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Mole ROI Detector</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: system-ui, sans-serif; 
+            background: #1a1a2e; 
+            color: #eee; 
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+        h1 { margin-bottom: 1.5rem; color: #e94560; }
+        
+        .upload-area {
+            border: 2px dashed #e94560;
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            width: 100%;
+            max-width: 500px;
+            transition: background 0.3s;
+        }
+        .upload-area:hover { background: rgba(233, 69, 96, 0.1); }
+        .upload-area input { display: none; }
+        
+        .results {
+            display: flex;
+            gap: 2rem;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .results img {
+            max-width: 500px;
+            max-height: 500px;
+            border-radius: 8px;
+            border: 2px solid #333;
+        }
+        .img-box { text-align: center; }
+        .img-box p { margin-top: 0.5rem; color: #aaa; }
+        
+        .stats {
+            margin-top: 1.5rem;
+            background: #16213e;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            max-width: 500px;
+            width: 100%;
+        }
+        .stats p { margin: 0.3rem 0; }
+        
+        .loader {
+            display: none;
+            margin-top: 1rem;
+            color: #e94560;
+        }
+
+        .controls {
+            display: flex;
+            gap: 2rem;
+            margin-bottom: 1.5rem;
+            background: #16213e;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+        }
+        .slider-group input[type="range"] {
+            width: 180px;
+            accent-color: #e94560;
+        }
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Mole ROI Detector (YOLOv8)</h1>
+
+    <div class="controls">
+        <div class="slider-group">
+            <label>Confidence: <span id="confValue">0.45</span></label>
+            <input type="range" id="confSlider" min="0.05" max="0.95" step="0.05" value="0.45">
+        </div>
+        <div class="slider-group">
+            <label>IoU (NMS): <span id="iouValue">0.45</span></label>
+            <input type="range" id="iouSlider" min="0.05" max="0.95" step="0.05" value="0.45">
+        </div>
+        <div class="checkbox-group">
+            <label>
+                <input type="checkbox" id="agnosticNms" checked>
+                Agnostic NMS
+            </label>
+        </div>
+    </div>
+
+    <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+        <p>Click or drag an image here</p>
+        <input type="file" id="fileInput" accept="image/*">
+    </div>
+
+    <div class="loader" id="loader">Processing...</div>
+
+    <div class="results" id="results"></div>
+    <div class="stats" id="stats" style="display:none"></div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const results = document.getElementById('results');
+        const stats = document.getElementById('stats');
+        const loader = document.getElementById('loader');
+        const uploadArea = document.querySelector('.upload-area');
+        const confSlider = document.getElementById('confSlider');
+        const iouSlider = document.getElementById('iouSlider');
+        const confValue = document.getElementById('confValue');
+        const iouValue = document.getElementById('iouValue');
+        const agnosticNms = document.getElementById('agnosticNms');
+
+        let currentFile = null;
+
+        // Update slider labels
+        confSlider.addEventListener('input', () => {
+            confValue.textContent = confSlider.value;
+        });
+        iouSlider.addEventListener('input', () => {
+            iouValue.textContent = iouSlider.value;
+        });
+
+        // Re-run prediction when sliders change
+        confSlider.addEventListener('change', () => { if (currentFile) processFile(currentFile); });
+        iouSlider.addEventListener('change', () => { if (currentFile) processFile(currentFile); });
+        agnosticNms.addEventListener('change', () => { if (currentFile) processFile(currentFile); });
+
+        // Drag and drop
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(event => {
+            uploadArea.addEventListener(event, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+
+        ['dragenter', 'dragover'].forEach(event => {
+            uploadArea.addEventListener(event, () => {
+                uploadArea.style.background = 'rgba(233, 69, 96, 0.2)';
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(event => {
+            uploadArea.addEventListener(event, () => {
+                uploadArea.style.background = '';
+            });
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            const file = e.dataTransfer.files[0];
+            if (file) { currentFile = file; processFile(file); }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) { currentFile = file; processFile(file); }
+        });
+
+        async function processFile(file) {
+            const originalUrl = URL.createObjectURL(file);
+            results.innerHTML = `
+                <div class="img-box">
+                    <img src="${originalUrl}" alt="Original">
+                    <p>Original</p>
+                </div>
+            `;
+            stats.style.display = 'none';
+            loader.style.display = 'block';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const params = new URLSearchParams({
+                conf: confSlider.value,
+                iou: iouSlider.value,
+                agnostic_nms: agnosticNms.checked
+            });
+
+            try {
+                const response = await fetch(`/api/predict?${params}`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                results.innerHTML += `
+                    <div class="img-box">
+                        <img src="data:image/jpeg;base64,${data.image}" alt="Detection">
+                        <p>YOLO Detection</p>
+                    </div>
+                `;
+
+                let statsHtml = `<p><strong>Detections:</strong> ${data.detections.length}</p>`;
+                data.detections.forEach((det, i) => {
+                    statsHtml += `
+                        <p>Box ${i+1}: confidence ${(det.confidence * 100).toFixed(1)}% 
+                        | bbox [${det.bbox.map(v => v.toFixed(0)).join(', ')}]</p>
+                    `;
+                });
+                stats.innerHTML = statsHtml;
+                stats.style.display = 'block';
+
+            } catch (err) {
+                results.innerHTML += `<p style="color:red">Error: ${err.message}</p>`;
+            } finally {
+                loader.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</body>
+</html>
