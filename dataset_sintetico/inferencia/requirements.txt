@@ -1,0 +1,23 @@
+# Web framework
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Image handling
+pillow
+
+# OpenCV sin GUI (evita el error libGL.so.1 en servidor headless)
+opencv-python-headless
+
+# numpy 1.x obligatorio: torch 2.2.2 fue compilado contra numpy<2
+# Si sube a 2.x rompe con "RuntimeError: Numpy is not available"
+numpy<2
+
+# PyTorch CPU-only (Lightsail no tiene GPU)
+# Ahorra ~800 MB vs la versión default con CUDA
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu
+
+# YOLO - va ultimo para que respete las versiones de numpy/torch de arriba
+ultralytics
