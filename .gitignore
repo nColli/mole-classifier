@@ -1,4 +1,4 @@
 data
 __pycache__
-*.pt
 env
+dataset_sintetico/datasets
